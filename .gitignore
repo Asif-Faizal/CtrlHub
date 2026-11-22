@@ -1,0 +1,20 @@
+.env
+*.local
+.DS_Store
+
+# backend
+backend/coverage.out
+backend/bin/
+
+# web
+web/node_modules/
+web/dist/
+
+# mobile
+mobile/.dart_tool/
+mobile/build/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/ios/Pods/
+mobile/android/.gradle/
+mobile/android/local.properties

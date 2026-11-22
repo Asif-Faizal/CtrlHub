@@ -1,0 +1,130 @@
+# Production-safe base file: only the web dashboard is published.
+# For local development docker-compose.override.yml additionally exposes
+# MySQL, the API, n8n and WAHA on 127.0.0.1.
+name: ctrlhub
+
+x-n8n-env: &n8n-env
+  N8N_HOST: ${N8N_HOST:-localhost}
+  N8N_PORT: "5678"
+  N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+  N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?set N8N_ENCRYPTION_KEY in .env}
+  N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+  N8N_DIAGNOSTICS_ENABLED: "false"
+  N8N_PERSONALIZATION_ENABLED: "false"
+  N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+  N8N_RUNNERS_ENABLED: "true"
+  GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Asia/Kolkata}
+  TZ: ${GENERIC_TIMEZONE:-Asia/Kolkata}
+  # Read by the workflows' HTTP Request nodes.
+  CTRLHUB_API_URL: http://backend:8080/api/v1
+  CTRLHUB_AUTOMATION_KEY: ${AUTOMATION_API_KEY:?set AUTOMATION_API_KEY in .env}
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci"]
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ctrlhub}
+      MYSQL_USER: ${MYSQL_USER:-ctrlhub}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?set MYSQL_ROOT_PASSWORD in .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      HTTP_ADDR: ":8080"
+      DATABASE_DSN: ${MYSQL_USER:-ctrlhub}:${MYSQL_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE:-ctrlhub}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      ACCESS_TOKEN_TTL: ${ACCESS_TOKEN_TTL:-15m}
+      REFRESH_TOKEN_TTL: ${REFRESH_TOKEN_TTL:-720h}
+      SETUP_TOKEN_TTL: ${SETUP_TOKEN_TTL:-48h}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8081}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:8081}
+      PLATFORM_ADMIN_EMAIL: ${PLATFORM_ADMIN_EMAIL:-}
+      PLATFORM_ADMIN_PASSWORD: ${PLATFORM_ADMIN_PASSWORD:-}
+      PLATFORM_ADMIN_NAME: ${PLATFORM_ADMIN_NAME:-Platform Admin}
+      AUTOMATION_API_KEY: ${AUTOMATION_API_KEY:?set AUTOMATION_API_KEY in .env}
+      MESSAGING_PROVIDER: ${MESSAGING_PROVIDER:-mock}
+      WAHA_BASE_URL: http://waha:3000
+      WAHA_API_KEY: ${WAHA_API_KEY:-}
+      DEFAULT_COUNTRY_CODE: ${DEFAULT_COUNTRY_CODE:-91}
+      LOGIN_RATE_PER_MINUTE: ${LOGIN_RATE_PER_MINUTE:-10}
+
+  web:
+    platform: linux/amd64
+    build: ./web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8081}:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/nginx-health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # Imports the workflow JSON files into n8n before it starts.
+  n8n-init:
+    image: n8nio/n8n:latest
+    environment: *n8n-env
+    entrypoint: ["/bin/sh", "/workflows/import.sh"]
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n/workflows:/workflows:ro
+    restart: "no"
+
+  n8n:
+    image: n8nio/n8n:latest
+    restart: unless-stopped
+    depends_on:
+      n8n-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_healthy
+    environment: *n8n-env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  waha:
+    # Official free image is amd64-only; Docker Desktop emulates it on Apple Silicon.
+    platform: linux/amd64
+    image: devlikeapro/waha:latest
+    restart: unless-stopped
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY:?set WAHA_API_KEY in .env}
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME:-admin}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD:?set WAHA_DASHBOARD_PASSWORD in .env}
+      WHATSAPP_SWAGGER_USERNAME: ${WAHA_DASHBOARD_USERNAME:-admin}
+      WHATSAPP_SWAGGER_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      WHATSAPP_DEFAULT_ENGINE: GOWS
+      WAHA_PRINT_QR: "false"
+      WAHA_LOG_FORMAT: JSON
+    volumes:
+      - waha_sessions:/app/.sessions
+
+volumes:
+  mysql_data:
+  n8n_data:
+  waha_sessions:

@@ -1,0 +1,1154 @@
+openapi: 3.0.3
+info:
+  title: CtrlHub Gym Platform API
+  version: 0.1.0
+  description: |
+    Multi-tenant gym management and WhatsApp automation API.
+    Tenant identity is always taken from the authenticated principal,
+    never from client-supplied tenant_id fields on gym routes.
+servers:
+  - url: /api/v1
+    description: Relative to the web proxy or API host
+tags:
+  - name: Health
+  - name: Auth
+  - name: Platform
+  - name: Gym
+  - name: Automation
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      security: []
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, example: ok }
+  /readyz:
+    get:
+      tags: [Health]
+      security: []
+      summary: Readiness (database reachable)
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: Not ready
+  /auth/login:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "401":
+          $ref: "#/components/responses/Error"
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Rotate refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "200":
+          description: New session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+  /auth/logout:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Revoke refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshRequest"
+      responses:
+        "204":
+          description: Logged out
+  /auth/setup-password:
+    post:
+      tags: [Auth]
+      security: []
+      summary: Complete one-time password setup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string }
+                password: { type: string, minLength: 8 }
+      responses:
+        "200":
+          description: Password set
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Change password for the current user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, new_password]
+              properties:
+                current_password: { type: string }
+                new_password: { type: string, minLength: 8 }
+      responses:
+        "200":
+          description: Changed
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Current user and permissions
+      responses:
+        "200":
+          description: User info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserInfo"
+  /platform/stats:
+    get:
+      tags: [Platform]
+      summary: Platform overview stats
+      responses:
+        "200":
+          description: Stats
+  /platform/whatsapp-sessions:
+    get:
+      tags: [Platform]
+      summary: All tenant WhatsApp sessions
+      responses:
+        "200":
+          description: Sessions list
+  /platform/tenants:
+    get:
+      tags: [Platform]
+      summary: List gyms
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [ACTIVE, INACTIVE] }
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, default: 20 }
+      responses:
+        "200":
+          description: Paged tenants
+    post:
+      tags: [Platform]
+      summary: Onboard a gym and its primary admin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/OnboardRequest"
+      responses:
+        "201":
+          description: Created
+  /platform/tenants/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Platform]
+      summary: Get gym
+      responses:
+        "200":
+          description: Tenant
+    patch:
+      tags: [Platform]
+      summary: Update gym
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GymInput"
+      responses:
+        "200":
+          description: Updated
+  /platform/tenants/{id}/status:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    patch:
+      tags: [Platform]
+      summary: Activate or deactivate a gym
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { type: string, enum: [ACTIVE, INACTIVE] }
+      responses:
+        "200":
+          description: Updated
+  /platform/tenants/{id}/users:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Platform]
+      summary: List gym users
+      responses:
+        "200":
+          description: Users
+    post:
+      tags: [Platform]
+      summary: Create gym user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreate"
+      responses:
+        "201":
+          description: Created (may include setup_url)
+  /platform/tenants/{id}/users/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+      - $ref: "#/components/parameters/UserID"
+    patch:
+      tags: [Platform]
+      summary: Update gym user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Updated
+  /platform/tenants/{id}/whatsapp:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Platform]
+      summary: Tenant WhatsApp status
+      responses:
+        "200":
+          description: Session
+  /platform/tenants/{id}/audit:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Platform]
+      summary: Tenant audit log
+      responses:
+        "200":
+          description: Entries
+  /platform/users/{userID}/reset-password:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      tags: [Platform]
+      summary: Issue a new setup link for any user
+      responses:
+        "200":
+          description: setup_url
+  /gym/profile:
+    get:
+      tags: [Gym]
+      summary: Current gym profile
+      responses:
+        "200":
+          description: Tenant
+    put:
+      tags: [Gym]
+      summary: Update gym profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProfileInput"
+      responses:
+        "200":
+          description: Updated
+  /gym/users:
+    get:
+      tags: [Gym]
+      summary: List users in this gym
+      responses:
+        "200":
+          description: Users
+    post:
+      tags: [Gym]
+      summary: Create user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserCreate"
+      responses:
+        "201":
+          description: Created
+  /gym/users/{userID}:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    patch:
+      tags: [Gym]
+      summary: Update user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserUpdate"
+      responses:
+        "200":
+          description: Updated
+  /gym/users/{userID}/reset-password:
+    parameters:
+      - $ref: "#/components/parameters/UserID"
+    post:
+      tags: [Gym]
+      summary: Reset password (setup link)
+      responses:
+        "200":
+          description: setup_url
+  /gym/members:
+    get:
+      tags: [Gym]
+      summary: Search/list members
+      parameters:
+        - in: query
+          name: search
+          schema: { type: string }
+        - in: query
+          name: status
+          schema: { type: string, enum: [active, expired, none] }
+        - in: query
+          name: page
+          schema: { type: integer }
+        - in: query
+          name: page_size
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Paged members
+    post:
+      tags: [Gym]
+      summary: Create member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberInput"
+      responses:
+        "201":
+          description: Created
+  /gym/members/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Get member
+      responses:
+        "200":
+          description: Member
+    put:
+      tags: [Gym]
+      summary: Update member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemberInput"
+      responses:
+        "200":
+          description: Updated
+  /gym/members/{id}/memberships:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Member memberships
+      responses:
+        "200":
+          description: Page
+  /gym/members/{id}/payments:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Member payments
+      responses:
+        "200":
+          description: Page
+  /gym/members/{id}/attendance:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Member attendance
+      responses:
+        "200":
+          description: List
+  /gym/plans:
+    get:
+      tags: [Gym]
+      summary: List plans
+      parameters:
+        - in: query
+          name: active
+          schema: { type: boolean }
+      responses:
+        "200":
+          description: Plans
+    post:
+      tags: [Gym]
+      summary: Create plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanInput"
+      responses:
+        "201":
+          description: Created
+  /gym/plans/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    put:
+      tags: [Gym]
+      summary: Update plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlanInput"
+      responses:
+        "200":
+          description: Updated
+  /gym/memberships:
+    get:
+      tags: [Gym]
+      summary: List memberships
+      parameters:
+        - in: query
+          name: view
+          schema: { type: string, enum: [all, active, expiring, expired] }
+        - in: query
+          name: days
+          schema: { type: integer }
+        - in: query
+          name: member_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: page
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Page
+    post:
+      tags: [Gym]
+      summary: Assign membership
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignMembership"
+      responses:
+        "201":
+          description: Created
+  /gym/memberships/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Get membership
+      responses:
+        "200":
+          description: Membership
+  /gym/memberships/{id}/renew:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Non-destructive renewal (new row)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewMembership"
+      responses:
+        "201":
+          description: New membership
+  /gym/memberships/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Cancel membership
+      responses:
+        "200":
+          description: Cancelled
+  /gym/payments:
+    get:
+      tags: [Gym]
+      summary: List payments
+      parameters:
+        - in: query
+          name: member_id
+          schema: { type: string }
+        - in: query
+          name: from
+          schema: { type: string, format: date }
+        - in: query
+          name: to
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Page
+    post:
+      tags: [Gym]
+      summary: Record payment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentInput"
+      responses:
+        "201":
+          description: Created
+  /gym/attendance:
+    get:
+      tags: [Gym]
+      summary: List attendance
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+        - in: query
+          name: member_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: List
+    post:
+      tags: [Gym]
+      summary: Check in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [member_id]
+              properties:
+                member_id: { type: string, format: uuid }
+                allow_expired: { type: boolean }
+      responses:
+        "201":
+          description: Created
+  /gym/holidays:
+    get:
+      tags: [Gym]
+      summary: List holidays
+      responses:
+        "200":
+          description: List
+    post:
+      tags: [Gym]
+      summary: Create holiday
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HolidayInput"
+      responses:
+        "201":
+          description: Created
+  /gym/holidays/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    put:
+      tags: [Gym]
+      summary: Update holiday
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HolidayInput"
+      responses:
+        "200":
+          description: Updated
+    delete:
+      tags: [Gym]
+      summary: Delete holiday
+      responses:
+        "204":
+          description: Deleted
+  /gym/leads:
+    get:
+      tags: [Gym]
+      summary: List leads
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string }
+      responses:
+        "200":
+          description: List
+    post:
+      tags: [Gym]
+      summary: Create lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadInput"
+      responses:
+        "201":
+          description: Created
+  /gym/leads/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    put:
+      tags: [Gym]
+      summary: Update lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadInput"
+      responses:
+        "200":
+          description: Updated
+  /gym/campaigns:
+    get:
+      tags: [Gym]
+      summary: List campaigns
+      responses:
+        "200":
+          description: List
+    post:
+      tags: [Gym]
+      summary: Create campaign draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CampaignInput"
+      responses:
+        "201":
+          description: Created
+  /gym/campaigns/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Get campaign
+      responses:
+        "200":
+          description: Campaign
+    put:
+      tags: [Gym]
+      summary: Update draft campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CampaignInput"
+      responses:
+        "200":
+          description: Updated
+  /gym/campaigns/{id}/recipients:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Gym]
+      summary: Campaign recipients
+      responses:
+        "200":
+          description: List
+  /gym/campaigns/{id}/submit:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Submit for approval
+      responses:
+        "200":
+          description: Pending approval
+  /gym/campaigns/{id}/approve:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Approve and materialize recipients
+      responses:
+        "200":
+          description: Approved
+  /gym/campaigns/{id}/reject:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Reject campaign
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        "200":
+          description: Rejected
+  /gym/campaigns/{id}/cancel:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Gym]
+      summary: Cancel campaign
+      responses:
+        "200":
+          description: Cancelled
+  /gym/whatsapp:
+    get:
+      tags: [Gym]
+      summary: WhatsApp session status
+      responses:
+        "200":
+          description: session + provider
+  /gym/whatsapp/connect:
+    post:
+      tags: [Gym]
+      summary: Start/connect WhatsApp session
+      responses:
+        "200":
+          description: Session
+  /gym/whatsapp/qr:
+    get:
+      tags: [Gym]
+      summary: QR code (base64)
+      responses:
+        "200":
+          description: QR
+  /gym/whatsapp/disconnect:
+    post:
+      tags: [Gym]
+      summary: Disconnect session
+      responses:
+        "200":
+          description: Session
+  /gym/whatsapp/test-message:
+    post:
+      tags: [Gym]
+      summary: Send a test WhatsApp message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone: { type: string }
+                text: { type: string }
+      responses:
+        "200":
+          description: Message log
+  /gym/automation-settings:
+    get:
+      tags: [Gym]
+      summary: Automation toggles
+      responses:
+        "200":
+          description: Settings
+    put:
+      tags: [Gym]
+      summary: Update automation settings
+      responses:
+        "200":
+          description: Settings
+  /gym/messaging-preferences:
+    get:
+      tags: [Gym]
+      summary: Message templates and daily limit
+      responses:
+        "200":
+          description: Preferences
+    put:
+      tags: [Gym]
+      summary: Update messaging preferences
+      responses:
+        "200":
+          description: Preferences
+  /gym/messages:
+    get:
+      tags: [Gym]
+      summary: Message log
+      parameters:
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Page
+  /gym/reports/daily:
+    get:
+      tags: [Gym]
+      summary: Daily gym report
+      parameters:
+        - in: query
+          name: date
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Report
+  /automation/whatsapp/refresh-status:
+    post:
+      tags: [Automation]
+      security:
+        - automationKey: []
+      summary: Refresh WhatsApp status for all tenants
+      responses:
+        "200":
+          description: Sessions
+  /automation/notifications/due:
+    get:
+      tags: [Automation]
+      security:
+        - automationKey: []
+      summary: Eligible notifications for a type
+      parameters:
+        - in: query
+          name: type
+          required: true
+          schema:
+            type: string
+            enum: [expiry, holiday, birthday, daily_report]
+        - in: query
+          name: limit
+          schema: { type: integer, default: 200 }
+      responses:
+        "200":
+          description: items + count
+  /automation/notifications/send:
+    post:
+      tags: [Automation]
+      security:
+        - automationKey: []
+      summary: Send one due notification (server re-checks eligibility + dedupe)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, type, dedupe_key]
+              properties:
+                tenant_id: { type: string, format: uuid }
+                type: { type: string }
+                dedupe_key: { type: string }
+      responses:
+        "200":
+          description: SendResult
+  /automation/campaigns/pending:
+    get:
+      tags: [Automation]
+      security:
+        - automationKey: []
+      summary: Pending campaign recipients across tenants
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: items + count
+  /automation/campaigns/send:
+    post:
+      tags: [Automation]
+      security:
+        - automationKey: []
+      summary: Send one campaign recipient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tenant_id, recipient_id]
+              properties:
+                tenant_id: { type: string, format: uuid }
+                recipient_id: { type: string, format: uuid }
+      responses:
+        "200":
+          description: SendResult
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    automationKey:
+      type: apiKey
+      in: header
+      name: X-Automation-Key
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    UserID:
+      name: userID
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+  schemas:
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details:
+              type: object
+              additionalProperties: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string }
+    RefreshRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token: { type: string }
+    UserInfo:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        email: { type: string }
+        role: { type: string }
+        dashboard: { type: string, enum: [platform, gym] }
+        tenant_id: { type: string }
+        tenant_code: { type: string }
+        tenant_name: { type: string }
+        permissions:
+          type: array
+          items: { type: string }
+    Session:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string }
+        expires_in: { type: integer }
+        user: { $ref: "#/components/schemas/UserInfo" }
+    GymInput:
+      type: object
+      required: [name, owner_name, contact_number, email, timezone]
+      properties:
+        name: { type: string }
+        owner_name: { type: string }
+        contact_number: { type: string }
+        email: { type: string }
+        address: { type: string }
+        city: { type: string }
+        state: { type: string }
+        country: { type: string }
+        timezone: { type: string }
+        currency: { type: string }
+        max_users: { type: integer }
+        whatsapp_enabled: { type: boolean }
+    OnboardRequest:
+      type: object
+      required: [gym, admin]
+      properties:
+        gym: { $ref: "#/components/schemas/GymInput" }
+        admin: { $ref: "#/components/schemas/UserCreate" }
+    ProfileInput:
+      type: object
+      required: [name, owner_name, contact_number, email, timezone]
+      properties:
+        name: { type: string }
+        owner_name: { type: string }
+        contact_number: { type: string }
+        email: { type: string }
+        address: { type: string }
+        city: { type: string }
+        state: { type: string }
+        country: { type: string }
+        timezone: { type: string }
+    UserCreate:
+      type: object
+      required: [name, email]
+      properties:
+        name: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        role: { type: string }
+        password: { type: string }
+    UserUpdate:
+      type: object
+      required: [name, role, status]
+      properties:
+        name: { type: string }
+        phone: { type: string }
+        role: { type: string }
+        status: { type: string, enum: [ACTIVE, INACTIVE] }
+    MemberInput:
+      type: object
+      required: [full_name, phone]
+      properties:
+        full_name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        gender: { type: string }
+        date_of_birth: { type: string, format: date, nullable: true }
+        address: { type: string }
+        emergency_contact: { type: string }
+        notes: { type: string }
+        whatsapp_opt_in: { type: boolean }
+        marketing_opt_in: { type: boolean }
+    PlanInput:
+      type: object
+      required: [name, duration_type]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        duration_type: { type: string, enum: [MONTHLY, QUARTERLY, HALF_YEARLY, YEARLY, CUSTOM] }
+        duration_days: { type: integer, nullable: true }
+        price_minor: { type: integer }
+        is_active: { type: boolean }
+    AssignMembership:
+      type: object
+      required: [member_id, plan_id]
+      properties:
+        member_id: { type: string, format: uuid }
+        plan_id: { type: string, format: uuid }
+        start_date: { type: string, format: date, nullable: true }
+        total_amount_minor: { type: integer }
+        notes: { type: string }
+        initial_payment_minor: { type: integer }
+        payment_method: { type: string }
+    RenewMembership:
+      type: object
+      properties:
+        plan_id: { type: string, format: uuid }
+        total_amount_minor: { type: integer }
+        notes: { type: string }
+        initial_payment_minor: { type: integer }
+        payment_method: { type: string }
+    PaymentInput:
+      type: object
+      required: [member_id, amount_minor, method]
+      properties:
+        member_id: { type: string, format: uuid }
+        membership_id: { type: string, format: uuid }
+        amount_minor: { type: integer, minimum: 1 }
+        method: { type: string, enum: [CASH, UPI, CARD, BANK_TRANSFER, OTHER] }
+        reference: { type: string }
+        notes: { type: string }
+    HolidayInput:
+      type: object
+      required: [title, holiday_date]
+      properties:
+        title: { type: string }
+        description: { type: string }
+        holiday_date: { type: string, format: date }
+        notify_enabled: { type: boolean }
+        notify_days_before:
+          type: array
+          items: { type: integer }
+    LeadInput:
+      type: object
+      required: [full_name, phone]
+      properties:
+        full_name: { type: string }
+        phone: { type: string }
+        email: { type: string }
+        source: { type: string }
+        status: { type: string }
+        whatsapp_opt_in: { type: boolean }
+        marketing_opt_in: { type: boolean }
+        notes: { type: string }
+    CampaignInput:
+      type: object
+      required: [name, message, audience]
+      properties:
+        name: { type: string }
+        message: { type: string }
+        audience:
+          type: string
+          enum: [ACTIVE_MEMBERS, EXPIRED_MEMBERS, NEW_LEADS, EXPIRING_SOON, SELECTED_MEMBERS]
+        audience_params:
+          type: object
+        scheduled_at: { type: string, format: date-time, nullable: true }
